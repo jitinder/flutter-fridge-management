@@ -343,6 +343,7 @@ class _MyHomePageState extends State<MyHomePage> {
           _scanBarcode().then((barcode) {
             if (barcode == -1) {
               // Show manual entry dialog
+              _showItemSheet(FridgeItem.invalid());
             } else {
               // Show info dialog
               _showLoadingDialog();
