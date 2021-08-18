@@ -1,4 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_barcode_scanner/flutter_barcode_scanner.dart';
+import 'package:fridge_management/api-manager.dart';
+import 'package:shape_of_view/shape_of_view.dart';
+import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import 'classes/fridge-item.dart';
 
 void main() {
   runApp(MyApp());
@@ -34,15 +41,6 @@ class MyApp extends StatelessWidget {
 class MyHomePage extends StatefulWidget {
   MyHomePage({Key key, this.title}) : super(key: key);
 
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
   final String title;
 
   @override
@@ -50,17 +48,44 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+  String dropdownValue = "Expiry (Earliest)";
+  List<FridgeItem> items = [];
+  DateTime selectedDate = DateTime.now();
 
-  void _incrementCounter() {
+  @override
+  void initState() {
+    super.initState();
+    _loadSharedPrefs();
+  }
+
+  void _loadSharedPrefs() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String itemsString = prefs.getString('items_key');
+    if (itemsString == null) {
+      setState(() {
+        items = [];
+      });
+    } else {
+      setState(() {
+        items = FridgeItem.decode(itemsString);
+      });
+    }
+  }
+
+  void _addItem(FridgeItem fridgeItem) async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
     setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
+      items.add(fridgeItem);
     });
+    prefs.setString('items_key', FridgeItem.encode(items));
+  }
+
+  void _deleteItem(int index) async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    setState(() {
+      items.removeAt(index);
+    });
+    prefs.setString('items_key', FridgeItem.encode(items));
   }
 
   Widget _infoColumn(String title, String value, Color color) {
@@ -113,17 +138,196 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 
+  Future<String> _scanBarcode() async {
+    String barcodeScanRes = await FlutterBarcodeScanner.scanBarcode(
+      "#ff6666",
+      "Cancel",
+      false,
+      ScanMode.BARCODE,
+    );
+    // If -1, cancelled - Show manual entry dialog
+    // else find item and show dialog with result from openfoodfacts
+    print("Barcode scan result: " + barcodeScanRes);
+    return barcodeScanRes;
+  }
+
+  void _showLoadingDialog() {
+    showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) {
+          return SimpleDialog(
+            title: Text("Fetching Item Information..."),
+            titlePadding: EdgeInsets.symmetric(
+              vertical: 16,
+              horizontal: 16,
+            ),
+            children: [
+              Center(
+                child: CircularProgressIndicator(),
+              ),
+            ],
+          );
+        });
+  }
+
+  void _selectDate(StateSetter setter) async {
+    final DateTime picked = await showDatePicker(
+      context: context,
+      initialDate: selectedDate,
+      firstDate: DateTime(2021),
+      lastDate: DateTime(2025),
+    );
+    if (picked != null && picked != selectedDate)
+      setter(() {
+        selectedDate = picked;
+      });
+  }
+
+  void _showItemSheet(FridgeItem fridgeItem) {
+    selectedDate = DateTime.now();
+    TextEditingController _controller =
+        TextEditingController(text: fridgeItem.name);
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return StatefulBuilder(
+            builder: (BuildContext context, StateSetter setter) {
+          return Padding(
+            padding: MediaQuery.of(context).viewInsets,
+            child: Container(
+              padding: EdgeInsets.only(
+                left: 12,
+                right: 12,
+                top: 24,
+              ),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.only(
+                  topLeft: Radius.circular(40.0),
+                ),
+                color: Colors.white,
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ShapeOfView(
+                    shape: CircleShape(),
+                    elevation: 0,
+                    child: fridgeItem.imageUrl != null
+                        ? Image.network(
+                            fridgeItem.imageUrl,
+                            height: 150,
+                            width: 150,
+                            fit: BoxFit.fitHeight,
+                          )
+                        : Image.asset(
+                            "images/food.png",
+                            height: 150,
+                            width: 150,
+                            fit: BoxFit.fitHeight,
+                          ),
+                  ),
+                  Container(
+                    padding: EdgeInsets.symmetric(
+                      vertical: 16,
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: <Widget>[
+                        Container(
+                          width: 100,
+                          child: TextField(
+                            controller: _controller,
+                            enabled: true,
+                            onSubmitted: (String text) {
+                              setter(() {
+                                fridgeItem.name = text;
+                              });
+                            },
+                          ),
+                        ),
+                        Icon(Icons.edit),
+                      ],
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () {
+                      _selectDate(setter);
+                    },
+                    child: Text(
+                      "Expiry Date: ${DateFormat('dd MMM yyyy').format(selectedDate)}",
+                    ),
+                  ),
+                  ButtonBar(
+                    children: [
+                      TextButton(
+                        onPressed: () {
+                          Navigator.pop(context);
+                        },
+                        child: Text("Cancel"),
+                      ),
+                      RaisedButton(
+                        onPressed: () {
+                          fridgeItem.dateExpiring = selectedDate;
+                          _addItem(fridgeItem);
+                          Navigator.pop(context);
+                        },
+                        color: Theme.of(context).primaryColor,
+                        textColor: Colors.white,
+                        child: Text("Add"),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          );
+        });
+      },
+    );
+  }
+
+  int _getExpiredItemCount() {
+    DateTime expiryThreshold = DateTime.now();
+    int count = 0;
+    for (FridgeItem item in items) {
+      if (item.dateExpiring.isBefore(expiryThreshold)) {
+        count++;
+      }
+    }
+    return count;
+  }
+
   @override
   Widget build(BuildContext context) {
-    var topHeight = MediaQuery.of(context).size.height * 4 / 9;
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
+    var topHeight = MediaQuery.of(context).size.height * 4 / 10;
+
     return Scaffold(
       backgroundColor: Colors.deepPurple,
+      resizeToAvoidBottomInset: true,
+      floatingActionButton: FloatingActionButton.extended(
+        label: Text("New Item"),
+        icon: Icon(Icons.add),
+        onPressed: () {
+          _scanBarcode().then((barcode) {
+            if (barcode == -1) {
+              // Show manual entry dialog
+            } else {
+              // Show info dialog
+              _showLoadingDialog();
+
+              OpenFoodFacts.getFridgeItem(barcode).then((fridgeItem) {
+                // Dismiss loading dialog
+                Navigator.pop(context);
+                _showItemSheet(fridgeItem);
+              });
+            }
+          });
+        },
+      ),
       body: SafeArea(
         child: Stack(
           children: [
@@ -133,7 +337,7 @@ class _MyHomePageState extends State<MyHomePage> {
               // alignment: Alignment.centerLeft,
               padding: EdgeInsets.symmetric(
                 horizontal: 16,
-                vertical: 24,
+                vertical: 20,
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -150,7 +354,7 @@ class _MyHomePageState extends State<MyHomePage> {
                     ),
                   ),
                   SizedBox(
-                    height: 50,
+                    height: 30,
                   ),
                   Text(
                     "Your Fridge Items",
@@ -161,18 +365,24 @@ class _MyHomePageState extends State<MyHomePage> {
                     ),
                   ),
                   SizedBox(
-                    height: 20,
+                    height: 10,
                   ),
                   Expanded(
                     child: Container(
-                      padding: EdgeInsets.all(16),
+                      padding: EdgeInsets.all(12),
                       // color: Colors.white,
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          _infoColumn("Total", "3", Colors.blue),
-                          _infoColumn("Valid", "3", Colors.green),
-                          _infoColumn("Expired", "0", Colors.red),
+                          _infoColumn(
+                              "Total", items.length.toString(), Colors.blue),
+                          _infoColumn(
+                              "Valid",
+                              (items.length - _getExpiredItemCount())
+                                  .toString(),
+                              Colors.green),
+                          _infoColumn("Expired",
+                              _getExpiredItemCount().toString(), Colors.red),
                         ],
                       ),
                     ),
@@ -191,16 +401,95 @@ class _MyHomePageState extends State<MyHomePage> {
                 color: Colors.white,
               ),
               padding: EdgeInsets.all(24),
-              child: SingleChildScrollView(
-                child: Container(
-                  child: Text(
-                    "Test",
-                    style: TextStyle(
-                      fontSize: 24.0,
-                      fontWeight: FontWeight.w500,
+              child: Column(
+                children: [
+                  Expanded(
+                    flex: 1,
+                    child: Container(
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            "Item List",
+                            style: TextStyle(
+                              fontSize: 24.0,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          DropdownButtonHideUnderline(
+                            child: ButtonTheme(
+                              alignedDropdown: true,
+                              child: DropdownButton<String>(
+                                  icon: Icon(Icons.sort),
+                                  value: dropdownValue,
+                                  items: <String>[
+                                    'Expiry (Earliest)',
+                                    'Expiry (Latest)',
+                                    'Name (Ascending)',
+                                    'Name (Descending)'
+                                  ].map<DropdownMenuItem<String>>(
+                                      (String value) {
+                                    return DropdownMenuItem<String>(
+                                      value: value,
+                                      child: Text(
+                                        value,
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                    );
+                                  }).toList(),
+                                  onChanged: (String newValue) {
+                                    setState(() {
+                                      dropdownValue = newValue;
+                                    });
+                                  }),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
+                  Expanded(
+                    flex: 4,
+                    child: ListView.separated(
+                      itemCount: items.length,
+                      itemBuilder: (BuildContext context, int index) {
+                        FridgeItem item = items[index];
+                        return ListTile(
+                          leading: ShapeOfView(
+                            shape: CircleShape(),
+                            elevation: 0,
+                            child: item.imageUrl != null
+                                ? Image.network(
+                                    item.imageUrl,
+                                    height: 50,
+                                    width: 50,
+                                    fit: BoxFit.fitHeight,
+                                  )
+                                : Image.asset(
+                                    "images/food.png",
+                                    height: 50,
+                                    width: 50,
+                                    fit: BoxFit.fitHeight,
+                                  ),
+                          ),
+                          title: Text(item.name),
+                          subtitle: Text(DateFormat('dd MMM yyyy')
+                              .format(item.dateExpiring)),
+                          trailing: IconButton(
+                            icon: Icon(Icons.delete),
+                            onPressed: () {
+                              _deleteItem(index);
+                            },
+                          ),
+                        );
+                      },
+                      separatorBuilder: (BuildContext context, int index) =>
+                          const Divider(),
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
