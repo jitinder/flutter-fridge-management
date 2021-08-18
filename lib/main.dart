@@ -68,6 +68,7 @@ class _MyHomePageState extends State<MyHomePage> {
     } else {
       setState(() {
         items = FridgeItem.decode(itemsString);
+        _sortItems();
       });
     }
   }
@@ -76,6 +77,7 @@ class _MyHomePageState extends State<MyHomePage> {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     setState(() {
       items.add(fridgeItem);
+      _sortItems();
     });
     prefs.setString('items_key', FridgeItem.encode(items));
   }
@@ -301,6 +303,32 @@ class _MyHomePageState extends State<MyHomePage> {
     return count;
   }
 
+  void _sortItems() {
+    if (dropdownValue == 'Expiry (Earliest)') {
+      _sortByExpiry(true);
+    } else if (dropdownValue == 'Expiry (Latest)') {
+      _sortByExpiry(false);
+    } else if (dropdownValue == 'Name (Ascending)') {
+      _sortByName(true);
+    } else {
+      _sortByName(false);
+    }
+  }
+
+  void _sortByExpiry(bool earliest) {
+    items.sort((a, b) => a.dateExpiring.isBefore(b.dateExpiring) ? -1 : 1);
+    if (!earliest) {
+      items = items.reversed.toList();
+    }
+  }
+
+  void _sortByName(bool asc) {
+    items.sort((a, b) => a.name.compareTo(b.name));
+    if (!asc) {
+      items = items.reversed.toList();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     var topHeight = MediaQuery.of(context).size.height * 4 / 10;
@@ -442,6 +470,7 @@ class _MyHomePageState extends State<MyHomePage> {
                                   onChanged: (String newValue) {
                                     setState(() {
                                       dropdownValue = newValue;
+                                      _sortItems();
                                     });
                                   }),
                             ),
