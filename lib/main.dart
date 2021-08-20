@@ -1,13 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_barcode_scanner/flutter_barcode_scanner.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:fridge_management/api-manager.dart';
 import 'package:shape_of_view/shape_of_view.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:timezone/data/latest.dart' as tz;
+import 'package:timezone/timezone.dart' as tz;
 
 import 'classes/fridge-item.dart';
 
-void main() {
+Future<void> main() {
   runApp(MyApp());
 }
 
@@ -51,11 +55,40 @@ class _MyHomePageState extends State<MyHomePage> {
   String dropdownValue = "Expiry (Earliest)";
   List<FridgeItem> items = [];
   DateTime selectedDate = DateTime.now();
+  FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin;
+  MethodChannel platform =
+      MethodChannel('/flutter_local_notifications_example');
 
   @override
   void initState() {
     super.initState();
     _loadSharedPrefs();
+    _loadNotifs();
+    _loadLocalTimeZone();
+  }
+
+  void _loadNotifs() async {
+    flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
+// initialise the plugin. app_icon needs to be a added as a drawable resource to the Android head project
+    const AndroidInitializationSettings initializationSettingsAndroid =
+        AndroidInitializationSettings('@mipmap/ic_launcher');
+    final InitializationSettings initializationSettings =
+        InitializationSettings(
+      android: initializationSettingsAndroid,
+    );
+    await flutterLocalNotificationsPlugin.initialize(initializationSettings,
+        onSelectNotification: _selectNotification);
+  }
+
+  Future<void> _loadLocalTimeZone() async {
+    tz.initializeTimeZones();
+    tz.setLocalLocation(tz.UTC);
+  }
+
+  Future _selectNotification(String payload) async {
+    if (payload != null) {
+      debugPrint('notification payload: $payload');
+    }
   }
 
   void _loadSharedPrefs() async {
@@ -275,6 +308,16 @@ class _MyHomePageState extends State<MyHomePage> {
                         onPressed: () {
                           fridgeItem.dateExpiring = selectedDate;
                           _addItem(fridgeItem);
+                          _scheduleNotification(
+                              fridgeItem.dateExpiring
+                                  .subtract(Duration(hours: 12)),
+                              "Expiring Tomorrow: " + fridgeItem.name,
+                              "Use Soon!");
+                          _scheduleNotification(
+                              fridgeItem.dateExpiring
+                                  .subtract(Duration(days: 1)),
+                              "Expiring in Two Days: " + fridgeItem.name,
+                              "Use Soon!");
                           Navigator.pop(context);
                         },
                         color: Theme.of(context).primaryColor,
@@ -327,6 +370,22 @@ class _MyHomePageState extends State<MyHomePage> {
     if (!asc) {
       items = items.reversed.toList();
     }
+  }
+
+  Future<void> _scheduleNotification(
+      DateTime dateTime, String title, String body) async {
+    await flutterLocalNotificationsPlugin.zonedSchedule(
+        0,
+        title,
+        body,
+        tz.TZDateTime.from(dateTime, tz.local),
+        const NotificationDetails(
+          android: AndroidNotificationDetails('your channel id',
+              'your channel name', 'your channel description'),
+        ),
+        androidAllowWhileIdle: true,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime);
   }
 
   @override

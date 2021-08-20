@@ -33,6 +33,7 @@ dependencies:
   shape_of_view: ^1.0.2
   intl: ^0.16.1
   shared_preferences: any
+  flutter_local_notifications: ^4.0.1+2
 
 dev_dependencies:
   flutter_test:
